@@ -1,0 +1,224 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+local localPlayer = Players.LocalPlayer
+
+-- Toggles
+local ESP_ENABLED = false
+local SNAPLINES_ENABLED = false
+local AIMBOT_ENABLED = false
+
+-- FOV circle settings
+local FOV_RADIUS = 150 -- pixels
+local FOV_COLOR_SPEED = 3 -- speed of color shift
+
+local highlights = {}
+local snaplines = {}
+
+-- FOV Circle Drawing
+local fovCircle = Drawing.new("Circle")
+fovCircle.Thickness = 1
+fovCircle.NumSides = 100
+fovCircle.Radius = FOV_RADIUS
+fovCircle.Filled = false
+fovCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+fovCircle.Visible = true
+
+-- Rainbow color effect
+local function getRainbowColor(speed, offset)
+	local hue = (tick() * speed + offset) % 1
+	return Color3.fromHSV(hue, 1, 1)
+end
+
+-- Utility
+local function isEnemy(player)
+	return player ~= localPlayer and player.Team ~= localPlayer.Team
+end
+
+local function cleanup(player)
+	if highlights[player] then
+		highlights[player]:Destroy()
+		highlights[player] = nil
+	end
+	if snaplines[player] then
+		snaplines[player]:Remove()
+		snaplines[player] = nil
+	end
+end
+
+local function createHighlight(char)
+	local h = Instance.new("Highlight")
+	h.Name = "ESP_Highlight"
+	h.FillColor = Color3.new(1, 0, 0)
+	h.OutlineColor = Color3.new(1, 1, 1)
+	h.FillTransparency = 0.3
+	h.OutlineTransparency = 0
+	h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	h.Adornee = char
+	h.Parent = char
+	return h
+end
+
+local function createSnapline()
+	local line = Drawing.new("Line")
+	line.Color = Color3.new(1, 0, 0)
+	line.Thickness = 1
+	line.Transparency = 1
+	line.Visible = true
+	return line
+end
+
+local function addVisuals(player)
+	if player == localPlayer or not isEnemy(player) then return end
+
+	local function apply()
+		local char = player.Character
+		if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+
+		if ESP_ENABLED and not highlights[player] then
+			highlights[player] = createHighlight(char)
+		end
+		if SNAPLINES_ENABLED and not snaplines[player] then
+			snaplines[player] = createSnapline()
+		end
+	end
+
+	player.CharacterAdded:Connect(function()
+		task.wait(0.5)
+		cleanup(player)
+		apply()
+	end)
+
+	player.CharacterRemoving:Connect(function()
+		cleanup(player)
+	end)
+
+	player.AncestryChanged:Connect(function(_, parent)
+		if not parent then
+			cleanup(player)
+		end
+	end)
+
+	if player.Character then
+		apply()
+	end
+end
+
+for _, player in ipairs(Players:GetPlayers()) do
+	addVisuals(player)
+end
+Players.PlayerAdded:Connect(addVisuals)
+Players.PlayerRemoving:Connect(cleanup)
+
+RunService.RenderStepped:Connect(function()
+	local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+	-- Update FOV circle
+	fovCircle.Position = center
+	fovCircle.Color = getRainbowColor(FOV_COLOR_SPEED, 0)
+	fovCircle.Visible = true
+
+	for player, line in pairs(snaplines) do
+		local char = player.Character
+		if char and char:FindFirstChild("HumanoidRootPart") then
+			local pos, onScreen = Camera:WorldToViewportPoint(char.HumanoidRootPart.Position)
+			if onScreen then
+				line.Visible = true
+				line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+				line.To = Vector2.new(pos.X, pos.Y)
+			else
+				line.Visible = false
+			end
+		else
+			line.Visible = false
+		end
+	end
+
+	-- Aimbot
+	if AIMBOT_ENABLED then
+		local closest, minDist = nil, math.huge
+		for _, player in ipairs(Players:GetPlayers()) do
+			if isEnemy(player) and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+				local pos, visible = Camera:WorldToViewportPoint(player.Character.HumanoidRootPart.Position)
+				if visible then
+					local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+					if dist < minDist and dist <= FOV_RADIUS then
+						minDist = dist
+						closest = player
+					end
+				end
+			end
+		end
+
+		if closest and closest.Character then
+			local targetPos = closest.Character.HumanoidRootPart.Position
+			local dir = (targetPos - Camera.CFrame.Position).Unit
+			Camera.CFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + dir)
+		end
+	end
+end)
+
+-- Create UI dynamically
+local screenGui = Instance.new("ScreenGui", localPlayer:WaitForChild("PlayerGui"))
+screenGui.Name = "DebugGUI"
+screenGui.ResetOnSpawn = false
+
+local frame = Instance.new("Frame", screenGui)
+frame.Position = UDim2.new(0, 20, 0, 100)
+frame.Size = UDim2.new(0, 200, 0, 240) -- made larger for future options
+frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+frame.BorderSizePixel = 0
+
+local UIListLayout = Instance.new("UIListLayout", frame)
+UIListLayout.Padding = UDim.new(0, 10)
+UIListLayout.FillDirection = Enum.FillDirection.Vertical
+UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local function createButton(name, onClick)
+	local button = Instance.new("TextButton", frame)
+	button.Name = name
+	button.Size = UDim2.new(0.9, 0, 0, 35)
+	button.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	button.TextColor3 = Color3.new(1, 1, 1)
+	button.Font = Enum.Font.SourceSansBold
+	button.TextSize = 16
+	button.Text = name
+	button.BorderSizePixel = 0
+	button.MouseButton1Click:Connect(onClick)
+	return button
+end
+
+createButton("Toggle ESP", function()
+	ESP_ENABLED = not ESP_ENABLED
+	for _, h in pairs(highlights) do
+		h:Destroy()
+	end
+	table.clear(highlights)
+	if ESP_ENABLED then
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player ~= localPlayer and player.Character and isEnemy(player) then
+				highlights[player] = createHighlight(player.Character)
+			end
+		end
+	end
+end)
+
+createButton("Toggle Snaplines", function()
+	SNAPLINES_ENABLED = not SNAPLINES_ENABLED
+	for _, l in pairs(snaplines) do
+		l:Remove()
+	end
+	table.clear(snaplines)
+	if SNAPLINES_ENABLED then
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player ~= localPlayer and player.Character and isEnemy(player) then
+				snaplines[player] = createSnapline()
+			end
+		end
+	end
+end)
+
+createButton("Toggle Aimbot", function()
+	AIMBOT_ENABLED = not AIMBOT_ENABLED
+end)
