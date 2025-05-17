@@ -515,3 +515,72 @@ Players.PlayerRemoving:Connect(function(player)
 	end
 end)
 
+local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
+
+-- Tracer function
+local function createTracer(startPos, endPos)
+    -- Create invisible part for attachment0
+    local tracerPart = Instance.new("Part")
+    tracerPart.Size = Vector3.new(0.2, 0.2, 0.2)
+    tracerPart.Anchored = true
+    tracerPart.CanCollide = false
+    tracerPart.Transparency = 1
+    tracerPart.CFrame = CFrame.new(startPos)
+    tracerPart.Parent = workspace
+
+    -- Create attachments
+    local attachment0 = Instance.new("Attachment", tracerPart)
+    local attachment1 = Instance.new("Attachment")
+    attachment1.WorldPosition = endPos
+    attachment1.Parent = workspace.Terrain
+
+    -- Create beam
+    local beam = Instance.new("Beam")
+    beam.Attachment0 = attachment0
+    beam.Attachment1 = attachment1
+    beam.Width0 = 0.02
+    beam.Width1 = 0.02
+    beam.FaceCamera = true
+
+    -- Full white, fully opaque, not glowing
+    beam.Color = ColorSequence.new(Color3.new(1, 1, 1))
+    beam.Transparency = NumberSequence.new(0) -- 0 = fully opaque
+    beam.LightEmission = 0 -- no glow
+    beam.LightInfluence = 1 -- fully affected by lighting (not shiny)
+    beam.Texture = "" -- no texture
+    beam.Parent = tracerPart
+
+    -- Clean up after 4 seconds
+    Debris:AddItem(tracerPart, 4)
+    Debris:AddItem(attachment1, 4)
+end
+
+-- Simulated bullet shot
+local function shootBullet(player)
+    local character = player.Character
+    if not character then return end
+
+    local head = character:FindFirstChild("Head")
+    if not head then return end
+
+    local origin = head.Position
+    local direction = head.CFrame.LookVector * 1000
+
+    -- Cast the bullet
+    local result = workspace:Raycast(origin, direction)
+    local hitPosition = result and result.Position or (origin + direction)
+
+    -- Only create tracer if bullet "fires"
+    createTracer(origin, hitPosition)
+end
+
+-- Detect player firing (LocalScript)
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+
+mouse.Button1Down:Connect(function()
+    shootBullet(player)
+end)
+
+
