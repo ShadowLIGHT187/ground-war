@@ -7,6 +7,7 @@ local localPlayer = Players.LocalPlayer
 local ESP_ENABLED = false
 local SNAPLINES_ENABLED = false
 local AIMBOT_ENABLED = false
+local BOXESP_ENABLED = false -- New toggle for box ESP
 
 -- FOV circle settings
 local FOV_RADIUS = 150 -- pixels
@@ -14,6 +15,7 @@ local FOV_COLOR_SPEED = 3 -- speed of color shift
 
 local highlights = {}
 local snaplines = {}
+local boxEspBoxes = {} -- store box ESP drawings
 
 -- FOV Circle Drawing
 local fovCircle = Drawing.new("Circle")
@@ -44,6 +46,12 @@ local function cleanup(player)
 		snaplines[player]:Remove()
 		snaplines[player] = nil
 	end
+	if boxEspBoxes[player] then
+		for _, box in pairs(boxEspBoxes[player]) do
+			box:Remove()
+		end
+		boxEspBoxes[player] = nil
+	end
 end
 
 local function createHighlight(char)
@@ -68,6 +76,37 @@ local function createSnapline()
 	return line
 end
 
+-- New: Create Box ESP function
+local function createBox()
+	local box = {}
+	box.Outline = Drawing.new("Square")
+	box.Outline.Color = Color3.new(1, 0, 0)
+	box.Outline.Thickness = 1
+	box.Outline.Transparency = 1
+	box.Outline.Filled = false
+	box.Outline.Visible = true
+
+	box.Fill = Drawing.new("Square")
+	box.Fill.Color = Color3.new(1, 0, 0)
+	box.Fill.Transparency = 0.1
+	box.Fill.Filled = true
+	box.Fill.Visible = true
+
+	function box:SetPosition(pos, size)
+		self.Outline.Position = pos
+		self.Outline.Size = size
+		self.Fill.Position = pos
+		self.Fill.Size = size
+	end
+
+	function box:Remove()
+		self.Outline:Remove()
+		self.Fill:Remove()
+	end
+
+	return box
+end
+
 local function addVisuals(player)
 	if player == localPlayer or not isEnemy(player) then return end
 
@@ -80,6 +119,9 @@ local function addVisuals(player)
 		end
 		if SNAPLINES_ENABLED and not snaplines[player] then
 			snaplines[player] = createSnapline()
+		end
+		if BOXESP_ENABLED and not boxEspBoxes[player] then
+			boxEspBoxes[player] = {createBox()}
 		end
 	end
 
@@ -134,26 +176,52 @@ RunService.RenderStepped:Connect(function()
 		end
 	end
 
-	-- Aimbot
-	if AIMBOT_ENABLED then
-		local closest, minDist = nil, math.huge
-		for _, player in ipairs(Players:GetPlayers()) do
-			if isEnemy(player) and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-				local pos, visible = Camera:WorldToViewportPoint(player.Character.HumanoidRootPart.Position)
-				if visible then
-					local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
-					if dist < minDist and dist <= FOV_RADIUS then
-						minDist = dist
-						closest = player
-					end
+	-- Update Box ESP
+	for player, boxes in pairs(boxEspBoxes) do
+		local char = player.Character
+		if char and char:FindFirstChild("HumanoidRootPart") then
+			local root = char.HumanoidRootPart
+			local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
+			if onScreen then
+				local size3D = Vector3.new(2, 5, 0) -- approximate player size for box
+				local cframe = root.CFrame
+				local corners = {
+					(cframe * CFrame.new(-size3D.X, size3D.Y, 0)).Position,
+					(cframe * CFrame.new(size3D.X, size3D.Y, 0)).Position,
+					(cframe * CFrame.new(-size3D.X, -size3D.Y, 0)).Position,
+					(cframe * CFrame.new(size3D.X, -size3D.Y, 0)).Position,
+				}
+
+				local screenCorners = {}
+				for i, corner in ipairs(corners) do
+					local screenPos = Camera:WorldToViewportPoint(corner)
+					screenCorners[i] = Vector2.new(screenPos.X, screenPos.Y)
+				end
+
+				local minX = math.min(screenCorners[1].X, screenCorners[2].X, screenCorners[3].X, screenCorners[4].X)
+				local maxX = math.max(screenCorners[1].X, screenCorners[2].X, screenCorners[3].X, screenCorners[4].X)
+				local minY = math.min(screenCorners[1].Y, screenCorners[2].Y, screenCorners[3].Y, screenCorners[4].Y)
+				local maxY = math.max(screenCorners[1].Y, screenCorners[2].Y, screenCorners[3].Y, screenCorners[4].Y)
+
+				local boxPos = Vector2.new(minX, minY)
+				local boxSize = Vector2.new(maxX - minX, maxY - minY)
+
+				for _, box in ipairs(boxes) do
+					box:SetPosition(boxPos, boxSize)
+					box.Outline.Visible = true
+					box.Fill.Visible = true
+				end
+			else
+				for _, box in ipairs(boxes) do
+					box.Outline.Visible = false
+					box.Fill.Visible = false
 				end
 			end
-		end
-
-		if closest and closest.Character then
-			local targetPos = closest.Character.HumanoidRootPart.Position
-			local dir = (targetPos - Camera.CFrame.Position).Unit
-			Camera.CFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + dir)
+		else
+			for _, box in ipairs(boxes) do
+				box.Outline.Visible = false
+				box.Fill.Visible = false
+			end
 		end
 	end
 end)
@@ -165,7 +233,7 @@ screenGui.ResetOnSpawn = false
 
 local frame = Instance.new("Frame", screenGui)
 frame.Position = UDim2.new(0, 20, 0, 100)
-frame.Size = UDim2.new(0, 200, 0, 240) -- made larger for future options
+frame.Size = UDim2.new(0, 220, 0, 300)
 frame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 frame.BorderSizePixel = 0
 
@@ -188,6 +256,73 @@ local function createButton(name, onClick)
 	button.MouseButton1Click:Connect(onClick)
 	return button
 end
+
+local function createLabel(text)
+	local label = Instance.new("TextLabel", frame)
+	label.Size = UDim2.new(0.9, 0, 0, 25)
+	label.BackgroundTransparency = 1
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.Font = Enum.Font.SourceSans
+	label.TextSize = 14
+	label.Text = text
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	return label
+end
+
+local function createSlider(min, max, default, callback)
+	local sliderFrame = Instance.new("Frame", frame)
+	sliderFrame.Size = UDim2.new(0.9, 0, 0, 40)
+	sliderFrame.BackgroundTransparency = 1
+
+	local sliderBar = Instance.new("Frame", sliderFrame)
+	sliderBar.Size = UDim2.new(1, -40, 0, 8)
+	sliderBar.Position = UDim2.new(0, 0, 0, 16)
+	sliderBar.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+	sliderBar.BorderSizePixel = 0
+	sliderBar.AnchorPoint = Vector2.new(0, 0.5)
+
+	local sliderFill = Instance.new("Frame", sliderBar)
+	sliderFill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+	sliderFill.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+	sliderFill.BorderSizePixel = 0
+
+	local sliderHandle = Instance.new("ImageButton", sliderBar)
+	sliderHandle.Size = UDim2.new(0, 20, 0, 20)
+	sliderHandle.Position = UDim2.new((default - min) / (max - min), -10, 0.5, -10)
+	sliderHandle.BackgroundTransparency = 1
+	sliderHandle.Image = "rbxassetid://3926305904"
+	sliderHandle.ImageColor3 = Color3.new(1, 1, 1)
+	sliderHandle.AnchorPoint = Vector2.new(0.5, 0.5)
+
+	local dragging = false
+
+	sliderHandle.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = true
+		end
+	end)
+
+	sliderHandle.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging = false
+		end
+	end)
+
+	sliderBar.InputChanged:Connect(function(input)
+		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+			local relativeX = math.clamp(input.Position.X - sliderBar.AbsolutePosition.X, 0, sliderBar.AbsoluteSize.X)
+			local value = min + (relativeX / sliderBar.AbsoluteSize.X) * (max - min)
+			sliderFill.Size = UDim2.new((value - min) / (max - min), 0, 1, 0)
+			sliderHandle.Position = UDim2.new((value - min) / (max - min), 0, 0.5, 0)
+			callback(math.floor(value))
+		end
+	end)
+
+	return sliderFrame
+end
+
+-- Snapline Render Distance variable
+local SNAPLINE_DISTANCE = 1000
 
 createButton("Toggle ESP", function()
 	ESP_ENABLED = not ESP_ENABLED
@@ -222,3 +357,161 @@ end)
 createButton("Toggle Aimbot", function()
 	AIMBOT_ENABLED = not AIMBOT_ENABLED
 end)
+
+createButton("Toggle Box ESP", function()
+	BOXESP_ENABLED = not BOXESP_ENABLED
+	for _, boxes in pairs(boxEspBoxes) do
+		for _, box in pairs(boxes) do
+			box:Remove()
+		end
+	end
+	table.clear(boxEspBoxes)
+	if BOXESP_ENABLED then
+		for _, player in ipairs(Players:GetPlayers()) do
+			if player ~= localPlayer and player.Character and isEnemy(player) then
+				boxEspBoxes[player] = {createBox()}
+			end
+		end
+	end
+end)
+
+createLabel("Snapline Render Distance")
+
+createSlider(100, 3000, SNAPLINE_DISTANCE, function(value)
+	SNAPLINE_DISTANCE = value
+end)
+
+local tracerEnabled = false
+createButton("Toggle Bullet Tracer", function()
+	tracerEnabled = not tracerEnabled
+end)
+
+RunService.RenderStepped:Connect(function()
+	local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+	-- Update FOV circle
+	fovCircle.Position = center
+	fovCircle.Color = Color3.new(1, 1, 1)  -- Thin white circle
+	fovCircle.Thickness = 1
+	fovCircle.Visible = true
+
+	-- Update Snaplines
+	for player, line in pairs(snaplines) do
+		local char = player.Character
+		if char and char:FindFirstChild("HumanoidRootPart") then
+			local pos, onScreen = Camera:WorldToViewportPoint(char.HumanoidRootPart.Position)
+			if onScreen and (char.HumanoidRootPart.Position - Camera.CFrame.Position).Magnitude <= SNAPLINE_DISTANCE then
+				line.Visible = true
+				line.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+				line.To = Vector2.new(pos.X, pos.Y)
+			else
+				line.Visible = false
+			end
+		else
+			line.Visible = false
+		end
+	end
+
+	-- Update Box ESP
+	for player, boxes in pairs(boxEspBoxes) do
+		local char = player.Character
+		if char and char:FindFirstChild("HumanoidRootPart") then
+			local rootPos, onScreen = Camera:WorldToViewportPoint(char.HumanoidRootPart.Position)
+			if onScreen then
+				local size = Vector2.new(50, 100) -- Box size (width, height)
+				local pos = Vector2.new(rootPos.X - size.X / 2, rootPos.Y - size.Y / 2)
+
+				for _, box in pairs(boxes) do
+					box.Visible = true
+					box.From = pos
+					box.To = pos + Vector2.new(size.X, 0)
+					box.Color = Color3.new(1, 0, 0) -- Red
+				end
+			else
+				for _, box in pairs(boxes) do
+					box.Visible = false
+				end
+			end
+		else
+			for _, box in pairs(boxes) do
+				box.Visible = false
+			end
+		end
+	end
+
+	-- Aimbot
+	if AIMBOT_ENABLED then
+		local closest, minDist = nil, math.huge
+		for _, player in ipairs(Players:GetPlayers()) do
+			if isEnemy(player) and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+				local pos, visible = Camera:WorldToViewportPoint(player.Character.HumanoidRootPart.Position)
+				if visible then
+					local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+					if dist < minDist and dist <= FOV_RADIUS then
+						minDist = dist
+						closest = player
+					end
+				end
+			end
+		end
+
+		if closest and closest.Character then
+			local targetPos = closest.Character.HumanoidRootPart.Position
+			local dir = (targetPos - Camera.CFrame.Position).Unit
+			Camera.CFrame = CFrame.new(Camera.CFrame.Position, Camera.CFrame.Position + dir)
+		end
+	end
+end)
+
+-- Bullet Tracer handling
+local bulletTracers = {}
+
+local function createBulletTracer(from, to)
+	local tracer = Drawing.new("Line")
+	tracer.From = from
+	tracer.To = to
+	tracer.Color = Color3.new(1, 1, 1) -- white
+	tracer.Thickness = 2
+	tracer.Transparency = 1
+	tracer.Visible = true
+	return tracer
+end
+
+-- Example hit event simulation (replace this with your actual hit detection event)
+-- When you hit a player, call showTracer with the start and end screen positions
+local function showTracer(fromWorldPos, toWorldPos)
+	if not tracerEnabled then return end
+	local fromPos, fromOnScreen = Camera:WorldToViewportPoint(fromWorldPos)
+	local toPos, toOnScreen = Camera:WorldToViewportPoint(toWorldPos)
+	if fromOnScreen and toOnScreen then
+		local tracer = createBulletTracer(Vector2.new(fromPos.X, fromPos.Y), Vector2.new(toPos.X, toPos.Y))
+		table.insert(bulletTracers, tracer)
+		delay(3, function()
+			tracer:Remove()
+			for i, v in ipairs(bulletTracers) do
+				if v == tracer then
+					table.remove(bulletTracers, i)
+					break
+				end
+			end
+		end)
+	end
+end
+
+-- Example to hook your hit event here:
+-- local weapon = ... -- your weapon reference
+-- weapon.OnHit:Connect(function(hitPosition)
+--     showTracer(Camera.CFrame.Position, hitPosition)
+-- end)
+
+-- Cleanup player visuals on removal
+Players.PlayerRemoving:Connect(function(player)
+	cleanup(player)
+	if boxEspBoxes[player] then
+		for _, box in pairs(boxEspBoxes[player]) do
+			box:Remove()
+		end
+		boxEspBoxes[player] = nil
+	end
+end)
+
